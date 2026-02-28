@@ -99,6 +99,123 @@ function NavItem({item,depth=0,activeId,onNav}) {
   </div>;
 }
 
+// Fuzzy search: checks if all characters in query appear in text in order
+function fuzzyMatch(query, text) {
+  const q = query.toLowerCase();
+  const t = text.toLowerCase();
+  // exact substring match = highest priority
+  if (t.includes(q)) return { match: true, score: 100 };
+  // fuzzy: all chars appear in order
+  let qi = 0;
+  for (let ti = 0; ti < t.length && qi < q.length; ti++) {
+    if (t[ti] === q[qi]) qi++;
+  }
+  if (qi === q.length) return { match: true, score: 50 };
+  return { match: false, score: 0 };
+}
+
+// Search index: maps keywords to section IDs
+const SEARCH_INDEX = [
+  {id:"charge",keywords:"機材の充電 充電 バッテリー 光電管 ジャンプマット スピーカー iPhone iPad インカム Micro USB USB-C"},
+  {id:"loading",keywords:"荷積 積み込み バネット 光電管 反射板 三脚 メジャー コーン 養生テープ 雑巾 アンクルウエイト ウエイトベスト バーベルシャフト アジリティポール スピーカー メディシンボール ヤードスティック スピードガン"},
+  {id:"hotel",keywords:"宿泊先 ホテル 予約 金庫 経費 楽天トラベル"},
+  {id:"print",keywords:"印刷物 文具 記録用紙 CORISE No 一覧表 封筒 バインダー ボールペン"},
+  {id:"arrival",keywords:"現地到着 準備 到着 出発 アンケート Googleマップ"},
+  {id:"data-check",keywords:"データ確認 スプレッドシート 記録用紙 照合 スキャン PDF"},
+  {id:"corise-reg",keywords:"CORISE登録 未登録 公式LINE アカウント パスワード 二重登録"},
+  {id:"cash",keywords:"現金 金庫 経費売上管理表 入金"},
+  {id:"asana",keywords:"Asana CORISE チーム追加 登録案内 サブタスク テンプレ"},
+  {id:"route",keywords:"導線 PowerPoint テンプレート Google Earth 航空写真"},
+  {id:"line",keywords:"公式LINE 連絡 定型文"},
+  {id:"schedule",keywords:"タイスケ スケジュール 形態計測 W-up フィジカル フィードバック"},
+  {id:"bamiri",keywords:"場ミリ 50m 30m 20m スプリント アローヘッド プロアジリティ Yo-Yo 40ヤード レーン 粉チョーク 養生テープ 光電管 減速区間"},
+  {id:"staff-pos",keywords:"スタッフ 立ち位置 プロアジリティ レーンアジリティ アローヘッド Tテスト"},
+  {id:"measure-table",keywords:"測定項目 競技別 サッカー バスケ 野球 アメフト ハンドボール ラクロス"},
+  {id:"measure-detail",keywords:"身長 座高 体重 ウイングスパン スタンディングリーチ チェストスロー 握力 垂直跳び リバウンドジャンプ ローデッドCMJ MBバックスロー 測定項目 詳細"},
+  {id:"equip-trouble",keywords:"機材トラブル voltOno"},
+  {id:"fb-output",keywords:"即時FB フィードバック 出力 データ入力 Adobe PDF 配信"},
+  {id:"parttime",keywords:"アルバイト バイト"},
+  {id:"critical",keywords:"取り返しのつかない 忘れ物 場ミリミス Yo-Yo 音源 現金"},
+  {id:"script-soccer",keywords:"サッカー スクリプト 50m プロアジリティ アローヘッド Yo-Yo"},
+  {id:"script-basket",keywords:"バスケ レーンアジリティ 最高到達点 ヤードスティック"},
+  {id:"script-baseball",keywords:"野球 リアクションスプリント 球速 スイングスピード"},
+  {id:"script-handball",keywords:"ハンドボール Tテスト MBスロー 膝立ち"},
+  {id:"script-lacrosse",keywords:"ラクロス 遠投"},
+  {id:"script-amefuto",keywords:"アメフト 40y 20yシャトル 3コーンドリル 3ポイント"},
+  {id:"fb-cutting",keywords:"カッティングアビリティ 切り返し 左右差"},
+  {id:"fb-speed",keywords:"走速度プロファイル 初速 33km カウンター"},
+  {id:"fb-momentum",keywords:"モメンタムビュー 赤ゾーン 緑ゾーン 黄ゾーン 青ゾーン 体重"},
+  {id:"fb-fv",keywords:"FVプロファイル 力不足 速度不足 筋力 CMJ"},
+  {id:"fb-phv",keywords:"PHV 最大成長速度 クラムジー 成長期 オスグッド 神経系"},
+  {id:"fb-muscle",keywords:"マッスルエラスティック VJ RJ 腱弾性"},
+  {id:"fb-plus",keywords:"栄養 タンパク質 カロリー kcal 補食 朝食"},
+  {id:"leader-instruct",keywords:"指示出し 指示 個別 抽象的"},
+  {id:"leader-manner",keywords:"振る舞い 身だしなみ 髪色 体型 清潔感"},
+  {id:"leader-relation",keywords:"先方 関わり 挨拶 専門用語 笑顔"},
+];
+
+// Get section title from SECTIONS tree
+function getSectionTitle(id) {
+  for (const p of SECTIONS) {
+    if (p.id === id) return p.title;
+    for (const ch of (p.children||[])) {
+      if (ch.id === id) return ch.title;
+      for (const ch2 of (ch.children||[])) {
+        if (ch2.id === id) return ch2.title;
+      }
+    }
+  }
+  return id;
+}
+
+function SearchBox({onNavigate}) {
+  const [query, setQuery] = useState("");
+  const [focused, setFocused] = useState(false);
+
+  const results = query.length >= 1
+    ? SEARCH_INDEX
+        .map(item => {
+          const {match, score} = fuzzyMatch(query, item.keywords);
+          return match ? {...item, score, title: getSectionTitle(item.id)} : null;
+        })
+        .filter(Boolean)
+        .sort((a,b) => b.score - a.score)
+        .slice(0, 8)
+    : [];
+
+  const handleSelect = (id) => {
+    onNavigate(id);
+    setQuery("");
+    setFocused(false);
+  };
+
+  return <div style={{position:"relative",marginLeft:"auto"}}>
+    <div style={{display:"flex",alignItems:"center",background:"#f3f4f6",borderRadius:8,padding:"6px 12px",gap:6,border:focused?"1px solid #3b82f6":"1px solid transparent",transition:"border 0.2s"}}>
+      <span style={{color:"#9ca3af",fontSize:14}}>🔍</span>
+      <input
+        value={query}
+        onChange={e=>setQuery(e.target.value)}
+        onFocus={()=>setFocused(true)}
+        onBlur={()=>setTimeout(()=>setFocused(false),200)}
+        placeholder="検索..."
+        style={{border:"none",background:"transparent",outline:"none",fontSize:13,color:"#374151",width:180,fontFamily:"inherit"}}
+      />
+      {query && <button onClick={()=>{setQuery("");}} style={{border:"none",background:"transparent",cursor:"pointer",color:"#9ca3af",fontSize:12,padding:0}}>✕</button>}
+    </div>
+    {focused && results.length > 0 && <div style={{position:"absolute",top:"100%",right:0,marginTop:4,width:320,background:"#fff",borderRadius:8,boxShadow:"0 4px 20px rgba(0,0,0,0.15)",border:"1px solid #e5e7eb",maxHeight:360,overflowY:"auto",zIndex:50}}>
+      {results.map((r,i) => <button key={r.id}
+        onMouseDown={()=>handleSelect(r.id)}
+        style={{width:"100%",textAlign:"left",padding:"10px 16px",border:"none",background:i===0?"#eff6ff":"#fff",cursor:"pointer",borderBottom:"1px solid #f3f4f6",display:"block",fontFamily:"inherit"}}>
+        <div style={{fontSize:13,fontWeight:600,color:"#1f2937"}}>{r.title}</div>
+        <div style={{fontSize:11,color:"#9ca3af",marginTop:2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.keywords.slice(0,60)}...</div>
+      </button>)}
+    </div>}
+    {focused && query.length >= 1 && results.length === 0 && <div style={{position:"absolute",top:"100%",right:0,marginTop:4,width:260,background:"#fff",borderRadius:8,boxShadow:"0 4px 20px rgba(0,0,0,0.15)",border:"1px solid #e5e7eb",padding:"16px",textAlign:"center",zIndex:50}}>
+      <div style={{fontSize:13,color:"#9ca3af"}}>該当する項目がありません</div>
+    </div>}
+  </div>;
+}
+
 export default function App() {
   const [activeId,setActiveId] = useState("charge");
   const [sidebarOpen,setSidebarOpen] = useState(true);
@@ -119,7 +236,8 @@ export default function App() {
     <main style={{flex:1,overflowY:"auto"}}>
       <header style={{position:"sticky",top:0,zIndex:10,background:"rgba(255,255,255,0.95)",borderBottom:"1px solid #e5e7eb",padding:"12px 24px",display:"flex",alignItems:"center",gap:12,backdropFilter:"blur(8px)"}}>
         <button onClick={()=>setSidebarOpen(!sidebarOpen)} style={{width:32,height:32,display:"flex",alignItems:"center",justifyContent:"center",borderRadius:4,border:"none",cursor:"pointer",background:"transparent",color:"#6b7280",fontSize:18}}>☰</button>
-        <div><div style={{fontWeight:900,fontSize:15,color:"#111827"}}>CORISE ソクテイ — 測定スタッフマニュアル</div><div style={{fontSize:11,color:"#9ca3af"}}>株式会社S-CADE. アスリート課</div></div>
+        <div style={{flex:"0 1 auto",minWidth:0}}><div style={{fontWeight:900,fontSize:15,color:"#111827",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>CORISE ソクテイ — 測定スタッフマニュアル</div><div style={{fontSize:11,color:"#9ca3af"}}>株式会社S-CADE. アスリート課</div></div>
+        <SearchBox onNavigate={handleNav} />
       </header>
 
       <div style={{maxWidth:896,margin:"0 auto",padding:"32px 24px"}}>
